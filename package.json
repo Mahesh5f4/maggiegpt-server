@@ -5,7 +5,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",  
+    "postinstall": "npm install -g nodemon"   // Install nodemon globally after npm install
   },
   "keywords": [],
   "author": "",
