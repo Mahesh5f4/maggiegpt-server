@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const { Chat } = require('./models');
+const { authMiddleware } = require('./middleware');
 const { v4: uuidv4 } = require('uuid');  // To generate unique session IDs
 
 const router = express.Router();
@@ -11,9 +12,10 @@ function isImagePrompt(prompt) {
   return keywords.some(k => prompt.toLowerCase().includes(k));
 }
 
-// POST /chat — Send a message and get AI response or image
-router.post("/chat", async (req, res) => {
+// ✅ POST /chat — Send a message and get AI response or image
+router.post("/chat", authMiddleware, async (req, res) => {
   const { prompt, sessionId } = req.body;
+  const userId = req.user.id;
 
   try {
     let aiMessage;
@@ -52,37 +54,45 @@ router.post("/chat", async (req, res) => {
       aiMessage = geminiResponse.data.candidates[0]?.content?.parts[0]?.text || "No response.";
     }
 
-    let chat;
+    // Find the user's chat or create a new one if not found
+    let chat = await Chat.findOne({ userId });
+    if (!chat) {
+      chat = new Chat({ userId, sessions: [], history: [] });
+    }
+
+    let session;
     if (sessionId) {
-      // Find the chat by sessionId if it exists
-      chat = await Chat.findOne({ 'sessions.sessionId': sessionId });
-      if (chat) {
-        const session = chat.sessions.find(session => session.sessionId === sessionId);
+      // Find the specific session if sessionId exists
+      session = chat.sessions.find(session => session.sessionId === sessionId);
+      if (session) {
         session.messages.push({ role: "user", content: prompt });
         session.messages.push({ role: "ai", content: imageUrl || aiMessage });
       } else {
         return res.status(404).json({ message: "Session not found" });
       }
     } else {
-      // Create a new chat session if no sessionId is provided
-      const newSessionId = uuidv4();
-      chat = new Chat({
-        sessions: [{
-          sessionId: newSessionId,
-          messages: [
-            { role: "user", content: prompt },
-            { role: "ai", content: imageUrl || aiMessage }
-          ]
-        }]
-      });
+      // Create a new session if no sessionId is provided
+      session = {
+        sessionId: uuidv4(),
+        messages: [
+          { role: "user", content: prompt },
+          { role: "ai", content: imageUrl || aiMessage }
+        ]
+      };
     }
 
-    // Save the chat session in the database
-    await chat.save();
+    // Update or insert the session in the database
+    await Chat.findOneAndUpdate(
+      { userId },
+      {
+        $push: { sessions: session },
+        $pull: { sessions: { sessionId: session.sessionId } },
+      },
+      { upsert: true }
+    );
 
     // Return the AI reply and image URL (if any)
-    const currentSessionId = sessionId || chat.sessions[0].sessionId;
-    res.json({ reply: aiMessage, sessionId: currentSessionId, imageUrl });
+    res.json({ reply: aiMessage, sessionId: session.sessionId, imageUrl });
 
   } catch (err) {
     console.error('Chat error:', err.message);
@@ -90,10 +100,12 @@ router.post("/chat", async (req, res) => {
   }
 });
 
-// GET /chat/history — Retrieve all chat sessions
-router.get("/chat/history", async (req, res) => {
+// ✅ GET /chat/history — Retrieve all chat sessions
+router.get("/chat/history", authMiddleware, async (req, res) => {
+  const userId = req.user.id;
+
   try {
-    const chat = await Chat.findOne().select('sessions');
+    const chat = await Chat.findOne({ userId }).select('sessions');
     res.json({ chatHistory: chat?.sessions || [] });
   } catch (err) {
     console.error('Chat history fetch error:', err.message);
@@ -101,18 +113,26 @@ router.get("/chat/history", async (req, res) => {
   }
 });
 
-// POST /new-chat — Start a new chat
-router.post("/new-chat", async (req, res) => {
-  try {
-    const sessionId = uuidv4();
-    const newSession = {
-      sessionId,
-      messages: []
-    };
+// ✅ POST /new-chat — Start a new chat
+router.post("/new-chat", authMiddleware, async (req, res) => {
+  const userId = req.user.id;
 
-    const chat = new Chat({
-      sessions: [newSession]
-    });
+  try {
+    let chat = await Chat.findOne({ userId });
+
+    if (!chat) {
+      chat = new Chat({ userId, sessions: [], history: [] });
+    }
+
+    if (!chat.sessions) chat.sessions = [];
+    if (!chat.history) chat.history = [];
+
+    chat.history.push(...chat.sessions);
+
+    const sessionId = uuidv4();
+    const newSession = { sessionId, messages: [] };
+
+    chat.sessions = [newSession];
 
     await chat.save();
 
