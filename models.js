@@ -2,25 +2,15 @@ const mongoose = require('mongoose');
 
 // User schema and model
 const userSchema = new mongoose.Schema({
-  name: String,
-  email: { type: String, unique: true },
-  password: String
+  name: { type: String, required: true },
+  email: { type: String, unique: true, required: true },
+  password: { type: String, required: true },
+  twoFactorCode: { type: String, default: '' },  // Stores the 2FA code
+  twoFactorCodeExpiration: { type: Date, default: Date.now },  // Stores the expiration time of the code
+  isTwoFactorEnabled: { type: Boolean, default: false },  // Optional, for managing 2FA status
+  isEmailVerified: { type: Boolean, default: false }
 });
 
 const User = mongoose.model("User", userSchema);
 
-// Chat schema and model
-const chatSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },  // userId refers to User model now
-  messages: [
-    {
-      role: String,
-      content: String,
-      timestamp: { type: Date, default: Date.now }
-    }
-  ]
-});
-
-const Chat = mongoose.model("Chat", chatSchema);
-
-module.exports = { User, Chat };
+module.exports = { User };
