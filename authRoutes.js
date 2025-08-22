@@ -1,11 +1,11 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-<<<<<<< HEAD
 const crypto = require('crypto');
 const session = require('express-session');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const nodemailer = require('nodemailer');
 
 const { User } = require('./models');
 const { authMiddleware } = require('./middleware');
@@ -14,12 +14,22 @@ const { sendEmail } = require('./send2FACode');
 
 const router = express.Router();
 
+// JWT secrets
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your_refresh_secret';
+
+// Nodemailer transporter
+const transporter = nodemailer.createTransport({
+  service: 'Gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
 // ===================
 // Passport Setup
 // ===================
-// Sessions and passport are already initialized in server.js
-// We only need to register the strategy here
-
 // Ensure callback URL uses explicit port fallback (5000) and matches mounted route (/api)
 const backendBase = (process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
 const googleCallback = process.env.GOOGLE_CALLBACK_URL || `${backendBase}/api/auth/google/callback`;
@@ -40,6 +50,7 @@ passport.use(
           name: profile.displayName,
           email: profile.emails[0].value,
           password: '', // Password is empty for Google accounts
+          isEmailVerified: true, // Google accounts are pre-verified
         });
       }
 
@@ -58,6 +69,43 @@ passport.deserializeUser(async (id, done) => {
   const user = await User.findById(id);
   done(null, user);
 });
+
+// Helper: Send verification email with 6-digit code
+async function sendVerificationEmail(email, code) {
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: 'Your Verification Code',
+    text: `Your verification code is: ${code}. It expires in 10 minutes.`,
+  };
+  await transporter.sendMail(mailOptions);
+}
+
+// Helper: Send password reset email with token link
+async function sendResetPasswordEmail(email, token) {
+  const resetUrl = `http://localhost:3000/reset-password?token=${token}`; // Adjust frontend URL
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: 'Password Reset Request',
+    text: `You requested a password reset. Use the link below to reset your password. The link expires in 1 hour.\n\n${resetUrl}`,
+  };
+  await transporter.sendMail(mailOptions);
+}
+
+// Generate JWT tokens (access + refresh)
+function generateTokens(userId) {
+  const accessToken = jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: '15m' }); // shorter expiry
+  const refreshToken = jwt.sign({ id: userId }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
+  return { accessToken, refreshToken };
+}
+
+// Middleware to rate-limit verification emails (1 per 2 minutes)
+async function canSendVerificationEmail(user) {
+  if (!user.lastVerificationEmailSentAt) return true;
+  const diff = Date.now() - new Date(user.lastVerificationEmailSentAt).getTime();
+  return diff > 2 * 60 * 1000; // 2 minutes cooldown
+}
 
 // ===================
 // Register Route
@@ -89,7 +137,12 @@ router.post('/register', async (req, res) => {
       return res.status(409).json({ message: 'Email already registered' });
     }
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user = new User({ name: name.trim(), email: email.toLowerCase(), password: hashedPassword, isEmailVerified: false });
+    const user = new User({ 
+      name: name.trim(), 
+      email: email.toLowerCase(), 
+      password: hashedPassword, 
+      isEmailVerified: false 
+    });
     // Generate verification code
     const code = crypto.randomInt(100000, 999999).toString();
     user.twoFactorCode = code;
@@ -145,124 +198,6 @@ router.post('/verify-register', async (req, res) => {
 // Login Route (with 2FA)
 // ===================
 router.post('/login', async (req, res) => {
-=======
-const passport = require('passport');
-const crypto = require('crypto');
-const { User } = require('./models');
-const { authMiddleware } = require('./middleware');
-const nodemailer = require('nodemailer');
-
-const router = express.Router();
-
-const JWT_SECRET = process.env.JWT_SECRET;
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your_refresh_secret'; // Add to .env
-
-// Nodemailer transporter
-const transporter = nodemailer.createTransport({
-  service: 'Gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-// Helper: Send verification email with 6-digit code
-async function sendVerificationEmail(email, code) {
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: email,
-    subject: 'Your Verification Code',
-    text: `Your verification code is: ${code}. It expires in 10 minutes.`,
-  };
-  await transporter.sendMail(mailOptions);
-}
-
-// Helper: Send password reset email with token link
-async function sendResetPasswordEmail(email, token) {
-  const resetUrl = `http://localhost:3000/reset-password?token=${token}`; // Adjust frontend URL
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: email,
-    subject: 'Password Reset Request',
-    text: `You requested a password reset. Use the link below to reset your password. The link expires in 1 hour.\n\n${resetUrl}`,
-  };
-  await transporter.sendMail(mailOptions);
-}
-
-// Generate JWT tokens (access + refresh)
-function generateTokens(userId) {
-  const accessToken = jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: '15m' }); // shorter expiry
-  const refreshToken = jwt.sign({ id: userId }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
-  return { accessToken, refreshToken };
-}
-
-// Middleware to rate-limit verification emails (1 per 2 minutes)
-async function canSendVerificationEmail(user) {
-  if (!user.lastVerificationEmailSentAt) return true;
-  const diff = Date.now() - new Date(user.lastVerificationEmailSentAt).getTime();
-  return diff > 2 * 60 * 1000; // 2 minutes cooldown
-}
-
-// --------------------- ROUTES ---------------------
-
-// Register route
-router.post("/register", async (req, res) => {
-  const { name, email, password } = req.body;
-  try {
-    const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ message: "Email already exists" });
-
-    const hashed = await bcrypt.hash(password, 10);
-
-    const verificationCode = crypto.randomInt(100000, 999999).toString();
-
-    const user = new User({
-      name,
-      email,
-      password: hashed,
-      isVerified: false,
-      verificationCode,
-      verificationCodeExpires: Date.now() + 10 * 60 * 1000, // 10 mins
-      lastVerificationEmailSentAt: new Date(),
-    });
-
-    await user.save();
-
-    await sendVerificationEmail(email, verificationCode);
-
-    res.json({ message: "User registered. Please verify your email with the code sent." });
-  } catch (err) {
-    console.error(err.message);
-    res.status(400).json({ message: "Registration failed", error: err.message });
-  }
-});
-
-// Verify email with code
-router.post("/verify-email", async (req, res) => {
-  const { email, code } = req.body;
-  try {
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: "User not found" });
-    if (user.isVerified) return res.json({ message: "User already verified" });
-
-    if (user.verificationCode !== code) return res.status(400).json({ message: "Invalid verification code" });
-    if (user.verificationCodeExpires < Date.now()) return res.status(400).json({ message: "Verification code expired" });
-
-    user.isVerified = true;
-    user.verificationCode = null;
-    user.verificationCodeExpires = null;
-    await user.save();
-
-    res.json({ message: "Email verified successfully" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Verification failed" });
-  }
-});
-
-// Login route with 2FA check & refresh token issuance
-router.post("/login", async (req, res) => {
->>>>>>> a931c1e34bbce6bc1f2c87d06560f7fffff34ace
   const { email, password } = req.body;
   try {
     if (!email || !password) {
@@ -272,30 +207,10 @@ router.post("/login", async (req, res) => {
     if (!user) return res.status(400).json({ message: 'Invalid credentials' });
     if (!user.isEmailVerified) return res.status(403).json({ message: 'Please verify your email before logging in' });
 
-<<<<<<< HEAD
     // Check if password is correct
-=======
-    if (!user.isVerified) {
-      // Rate limit resend verification email
-      if (!user.verificationCode || user.verificationCodeExpires < Date.now()) {
-        if (!(await canSendVerificationEmail(user))) {
-          return res.status(429).json({ message: "Too many requests. Please wait before requesting a new code." });
-        }
-
-        user.verificationCode = crypto.randomInt(100000, 999999).toString();
-        user.verificationCodeExpires = Date.now() + 10 * 60 * 1000;
-        user.lastVerificationEmailSentAt = new Date();
-        await user.save();
-        await sendVerificationEmail(email, user.verificationCode);
-      }
-      return res.status(403).json({ message: "Email not verified. Please verify using the code sent." });
-    }
-
->>>>>>> a931c1e34bbce6bc1f2c87d06560f7fffff34ace
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(400).json({ message: 'Invalid credentials' });
 
-<<<<<<< HEAD
     // Always send 2FA code on login
     const twoFactorCode = crypto.randomInt(100000, 999999).toString();
     user.twoFactorCode = twoFactorCode;
@@ -303,9 +218,6 @@ router.post("/login", async (req, res) => {
     await user.save();
     await send2FACode(user.email, twoFactorCode, 'Your MaggieGPT Login Code');
     return res.status(200).json({ message: '2FA code sent to your email', is2FA: true });
-
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
-    res.json({ token });
   } catch (err) {
     res.status(500).json({ message: 'Login failed', error: err.message });
   }
@@ -329,7 +241,7 @@ router.post('/verify-2fa', async (req, res) => {
       return res.status(400).json({ message: '2FA code expired' });
     }
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    const tokens = generateTokens(user._id);
 
     user.twoFactorCode = '';
     user.twoFactorCodeExpiration = Date.now();
@@ -344,56 +256,9 @@ router.post('/verify-2fa', async (req, res) => {
       </div>
     `);
 
-    res.json({ message: '2FA verified successfully', token });
+    res.json({ message: '2FA verified successfully', accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
   } catch (err) {
     res.status(500).json({ message: 'Failed to verify 2FA', error: err.message });
-  }
-});
-
-// ===================
-// Profile Route (JWT protected)
-// ===================
-router.get('/profile', authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id).select('name');
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    res.json({ name: user.name });
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch profile' });
-  }
-});
-
-// ===================
-// Google OAuth Routes
-// ===================
-
-// Start OAuth login
-router.get('/auth/google', 
-  passport.authenticate('google', { scope: ['profile', 'email'], accessType: 'offline', prompt: 'consent' })
-);
-
-// Callback after Google authentication
-router.get('/auth/google/callback',
-  passport.authenticate('google', { failureRedirect: '/' }),
-  async (req, res) => {
-    try {
-      const token = jwt.sign({ id: req.user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
-  const frontend = process.env.FRONTEND_URL || 'http://localhost:3000';
-  console.log('Google OAuth redirecting to frontend:', frontend);
-      // Send login welcome email for Google users as well
-      if (req.user?.email) {
-        try { await send2FACode(req.user.email, 'Welcome to MaggieGPT! You have logged in successfully.', 'Welcome to MaggieGPT'); } catch {}
-      }
-      // Redirect to chat page with token in query param; frontend will capture and store it
-      res.redirect(`${frontend}/chat?token=${token}`);
-    } catch (err) {
-      res.status(500).json({ message: 'Google login failed', error: err.message });
-=======
-    const tokens = generateTokens(user._id);
-    res.json({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Login failed" });
   }
 });
 
@@ -459,37 +324,44 @@ router.post('/password-reset/confirm', async (req, res) => {
   }
 });
 
-// Protected profile route (unchanged)
-router.get("/profile", authMiddleware, async (req, res) => {
+// ===================
+// Profile Route (JWT protected)
+// ===================
+router.get('/profile', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("name");
-    if (!user) return res.status(404).json({ message: "User not found" });
+    const user = await User.findById(req.user.id).select('name');
+    if (!user) return res.status(404).json({ message: 'User not found' });
     res.json({ name: user.name });
   } catch (error) {
-    res.status(500).json({ message: "Failed to fetch profile" });
+    res.status(500).json({ message: 'Failed to fetch profile' });
   }
 });
 
-// Google OAuth routes (unchanged)
-router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+// ===================
+// Google OAuth Routes
+// ===================
 
-router.get(
-  '/google/callback',
-  passport.authenticate('google', { session: false, failureRedirect: '/login' }),
+// Start OAuth login
+router.get('/auth/google', 
+  passport.authenticate('google', { scope: ['profile', 'email'], accessType: 'offline', prompt: 'consent' })
+);
+
+// Callback after Google authentication
+router.get('/auth/google/callback',
+  passport.authenticate('google', { failureRedirect: '/' }),
   async (req, res) => {
     try {
-      if (!req.user.isVerified) {
-        req.user.isVerified = true;
-        await req.user.save();
-      }
-
       const tokens = generateTokens(req.user._id);
-
-      res.redirect(`http://localhost:3000/google-success?token=${tokens.accessToken}&refreshToken=${tokens.refreshToken}`);
+      const frontend = process.env.FRONTEND_URL || 'http://localhost:3000';
+      console.log('Google OAuth redirecting to frontend:', frontend);
+      // Send login welcome email for Google users as well
+      if (req.user?.email) {
+        try { await send2FACode(req.user.email, 'Welcome to MaggieGPT! You have logged in successfully.', 'Welcome to MaggieGPT'); } catch {}
+      }
+      // Redirect to chat page with token in query param; frontend will capture and store it
+      res.redirect(`${frontend}/chat?token=${tokens.accessToken}&refreshToken=${tokens.refreshToken}`);
     } catch (err) {
-      console.error(err);
-      res.redirect('/login');
->>>>>>> a931c1e34bbce6bc1f2c87d06560f7fffff34ace
+      res.status(500).json({ message: 'Google login failed', error: err.message });
     }
   }
 );
