@@ -30,8 +30,8 @@ const transporter = nodemailer.createTransport({
 // ===================
 // Passport Setup
 // ===================
-// Ensure callback URL uses explicit port fallback (5000) and matches mounted route (/api)
-const backendBase = (process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
+// Ensure callback URL uses hosted backend URL
+const backendBase = (process.env.BACKEND_URL || 'https://maggiegpt-server-1.onrender.com').replace(/\/$/, '');
 const googleCallback = process.env.GOOGLE_CALLBACK_URL || `${backendBase}/api/auth/google/callback`;
 // Helpful debug info when running
 console.log('Google OAuth callback URL:', googleCallback);
@@ -83,7 +83,8 @@ async function sendVerificationEmail(email, code) {
 
 // Helper: Send password reset email with token link
 async function sendResetPasswordEmail(email, token) {
-  const resetUrl = `http://localhost:3000/reset-password?token=${token}`; // Adjust frontend URL
+  const frontendUrl = process.env.FRONTEND_URL || 'https://maggiegpt-frontend.vercel.app';
+  const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: email,
@@ -205,7 +206,15 @@ router.post('/login', async (req, res) => {
     }
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) return res.status(400).json({ message: 'Invalid credentials' });
-    if (!user.isEmailVerified) return res.status(403).json({ message: 'Please verify your email before logging in' });
+
+    // Treat either new or legacy verification flags as valid
+    const emailVerified = Boolean(user.isEmailVerified) || Boolean(user.isVerified);
+    if (!emailVerified) return res.status(403).json({ message: 'Please verify your email before logging in' });
+
+    // If user has no password (e.g., Google OAuth), guide to sign in with Google
+    if (!user.password) {
+      return res.status(400).json({ message: 'This account was created with Google. Please log in using Sign in with Google.' });
+    }
 
     // Check if password is correct
     const match = await bcrypt.compare(password, user.password);
@@ -352,7 +361,7 @@ router.get('/auth/google/callback',
   async (req, res) => {
     try {
       const tokens = generateTokens(req.user._id);
-      const frontend = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const frontend = process.env.FRONTEND_URL || 'https://maggiegpt-frontend.vercel.app';
       console.log('Google OAuth redirecting to frontend:', frontend);
       // Send login welcome email for Google users as well
       if (req.user?.email) {

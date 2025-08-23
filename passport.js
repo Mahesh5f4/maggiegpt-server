@@ -3,7 +3,7 @@ const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const { User } = require('./models');
 
 // Ensure callback URL matches the one in authRoutes.js
-const backendBase = (process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
+const backendBase = (process.env.BACKEND_URL || 'https://maggiegpt-server-1.onrender.com').replace(/\/$/, '');
 const googleCallback = process.env.GOOGLE_CALLBACK_URL || `${backendBase}/api/auth/google/callback`;
 
 passport.use(new GoogleStrategy({
