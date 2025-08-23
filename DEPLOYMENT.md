@@ -91,6 +91,16 @@ node test_backend.js
 
 ## 🔧 Troubleshooting
 
+### Issue: "path-to-regexp TypeError"
+If you see this error during deployment:
+```
+TypeError: Missing parameter name at 1: https://git.new/pathToRegexpError
+```
+
+**Solution:** This is fixed by:
+1. Using Express 4.18.2 instead of Express 5.x
+2. Using proper 404 handler syntax: `app.use((req, res) => {...})` instead of `app.use('*', ...)`
+
 ### Issue: "No response from backend"
 1. **Check if backend is running:**
    ```bash
