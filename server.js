@@ -15,6 +15,7 @@ require('./passport');
 
 const { connectDB } = require('./db');
 const authRoutes = require('./authRoutes');
+const authGoogle = require('./authGoogle');
 const chatRoutes = require('./chatRoutes');
 
 // Initialize express
@@ -96,6 +97,7 @@ app.get('/api/health', (req, res) => {
 // Routes
 // ===================
 app.use('/api', authRoutes);
+app.use('/', authGoogle);
 app.use('/api', chatRoutes);
 
 // ===================
@@ -115,15 +117,55 @@ app.use((req, res) => {
 });
 
 // ===================
-// Start Server
+// Start Server (with port-in-use handling)
 // ===================
-connectDB()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`✅ Server running on port ${PORT}`);
+const http = require('http');
+
+async function startServerWithRetries(startPort, maxAttempts = 5) {
+  let attempt = 0;
+  let port = Number(startPort);
+
+  while (attempt < maxAttempts) {
+    attempt += 1;
+    const server = http.createServer(app);
+
+    const result = await new Promise((resolve) => {
+      server.once('listening', () => resolve({ ok: true, server }));
+      server.once('error', (err) => resolve({ ok: false, err }));
+      server.listen(port);
+    });
+
+    if (result.ok) {
+      const actualPort = result.server.address().port;
+      console.log(`✅ Server running on port ${actualPort}`);
       console.log(`🌐 Backend URL: ${BACKEND_URL}`);
       console.log(`🔗 Health check: ${BACKEND_URL}/api/health`);
-    });
+      return result.server;
+    }
+
+    const err = result.err;
+    if (err && err.code === 'EADDRINUSE') {
+      console.warn(`Port ${port} in use, trying port ${port + 1} (attempt ${attempt}/${maxAttempts})`);
+      port += 1; // try next port
+      await new Promise(r => setTimeout(r, 200));
+      continue;
+    }
+
+    console.error('Failed to start server:', err);
+    throw err;
+  }
+
+  throw new Error(`Unable to bind to a port after ${maxAttempts} attempts starting at ${startPort}`);
+}
+
+connectDB()
+  .then(async () => {
+    try {
+      await startServerWithRetries(PORT, 8);
+    } catch (err) {
+      console.error('❌ Server start error:', err);
+      process.exit(1);
+    }
   })
   .catch(err => {
     console.error("❌ MongoDB connection error:", err);

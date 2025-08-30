@@ -99,8 +99,10 @@ router.post('/chat', async (req, res) => {
       if (recentChatRequests.length > 100) recentChatRequests.shift();
     } catch (e) { /* ignore logging issues */ }
     if (!userId) {
-      const entry = guestCounts.get(ip) || { count: 0, firstSeen: Date.now() };
+      let entry = guestCounts.get(ip) || { count: 0, firstSeen: Date.now(), expired: false };
       if (entry.count >= GUEST_LIMIT) {
+        entry.expired = true;
+        guestCounts.set(ip, entry);
         return res.status(401).json({ status: 'unauthenticated', message: 'Guest limit reached, please log in' });
       }
       entry.count += 1;
@@ -142,9 +144,7 @@ router.post('/chat', async (req, res) => {
       console.log('Gemini response length:', (aiMessage || '').length);
     }
 
-    // no server-side streaming: proceed to normal JSON response flow
-
-    // If authenticated, persist to DB similar to previous behavior
+    // If authenticated, persist to DB and move old sessions to history
     if (userId) {
       let chat = await Chat.findOne({ userId });
       if (!chat) {
@@ -161,15 +161,19 @@ router.post('/chat', async (req, res) => {
         chat.sessions[idx].messages.push({ role: 'user', content: prompt, timestamp: new Date() });
         chat.sessions[idx].messages.push({ role: 'ai', content: imageUrl || aiMessage, timestamp: new Date() });
       } else {
+        // Move any existing sessions to history before starting a new one
+        if (chat.sessions.length > 0) {
+          chat.history.push(...chat.sessions);
+        }
         activeSessionId = uuidv4();
-        chat.sessions.push({
+        chat.sessions = [{
           sessionId: activeSessionId,
           messages: [
             { role: 'user', content: prompt, timestamp: new Date() },
             { role: 'ai', content: imageUrl || aiMessage, timestamp: new Date() }
           ],
           updatedAt: new Date()
-        });
+        }];
       }
 
       // update updatedAt for the modified session

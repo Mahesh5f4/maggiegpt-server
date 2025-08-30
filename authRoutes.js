@@ -113,15 +113,19 @@ async function canSendVerificationEmail(user) {
 // ===================
 router.post('/register', async (req, res) => {
   const { name, email, password } = req.body;
+  console.log('[REGISTER] Request:', { name, email });
   try {
     if (!name || !email || !password) {
+      console.log('[REGISTER] Missing fields');
       return res.status(400).json({ message: 'All fields are required' });
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
+      console.log('[REGISTER] Invalid email format');
       return res.status(422).json({ message: 'Invalid email format' });
     }
     if (password.length < 8) {
+      console.log('[REGISTER] Password too short');
       return res.status(422).json({ message: 'Password must be at least 8 characters' });
     }
     const existing = await User.findOne({ email: email.toLowerCase() });
@@ -133,8 +137,10 @@ router.post('/register', async (req, res) => {
         existing.twoFactorCodeExpiration = Date.now() + 5 * 60 * 1000;
         await send2FACode(existing.email, code, 'Verify your email');
         await existing.save();
+        console.log('[REGISTER] Account exists, code resent');
         return res.json({ message: 'Account exists but not verified. Sent a new code to your email.', requiresVerification: true });
       }
+      console.log('[REGISTER] Email already registered');
       return res.status(409).json({ message: 'Email already registered' });
     }
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -151,9 +157,10 @@ router.post('/register', async (req, res) => {
     // Attempt to send email BEFORE saving to avoid ghost accounts on failure
     await send2FACode(user.email, code, 'Verify your email');
     await user.save();
+    console.log('[REGISTER] Success, verification code sent');
     res.json({ message: 'Registration successful. Verification code sent to your email.', requiresVerification: true });
   } catch (err) {
-    console.error(err.message);
+    console.error('[REGISTER] Error:', err.message);
     res.status(400).json({ message: 'Registration failed', error: err.message });
   }
 });
@@ -161,12 +168,25 @@ router.post('/register', async (req, res) => {
 // Verify email after registration
 router.post('/verify-register', async (req, res) => {
   const { email, code } = req.body;
+  console.log('[VERIFY REGISTER] Request:', { email, code });
   try {
     const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) return res.status(400).json({ message: 'Invalid email' });
-    if (user.isEmailVerified) return res.json({ message: 'Email already verified' });
-    if (user.twoFactorCode !== code) return res.status(400).json({ message: 'Invalid code' });
-    if (Date.now() > user.twoFactorCodeExpiration) return res.status(400).json({ message: 'Code expired' });
+    if (!user) {
+      console.log('[VERIFY REGISTER] Invalid email');
+      return res.status(400).json({ message: 'Invalid email' });
+    }
+    if (user.isEmailVerified) {
+      console.log('[VERIFY REGISTER] Already verified');
+      return res.json({ message: 'Email already verified' });
+    }
+    if (user.twoFactorCode !== code) {
+      console.log('[VERIFY REGISTER] Invalid code');
+      return res.status(400).json({ message: 'Invalid code' });
+    }
+    if (Date.now() > user.twoFactorCodeExpiration) {
+      console.log('[VERIFY REGISTER] Code expired');
+      return res.status(400).json({ message: 'Code expired' });
+    }
 
     user.isEmailVerified = true;
     user.twoFactorCode = '';
@@ -189,8 +209,10 @@ router.post('/verify-register', async (req, res) => {
         <p>— Team MaggieGPT</p>
       </div>
     `);
+    console.log('[VERIFY REGISTER] Success');
     res.json({ message: 'Email verified successfully' });
   } catch (err) {
+    console.error('[VERIFY REGISTER] Error:', err.message);
     res.status(500).json({ message: 'Verification failed', error: err.message });
   }
 });
@@ -200,25 +222,37 @@ router.post('/verify-register', async (req, res) => {
 // ===================
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
+  console.log('[LOGIN] Request:', { email });
   try {
     if (!email || !password) {
+      console.log('[LOGIN] Missing fields');
       return res.status(400).json({ message: 'Email and password are required' });
     }
     const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) return res.status(400).json({ message: 'Invalid credentials' });
+    if (!user) {
+      console.log('[LOGIN] Invalid credentials');
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
 
     // Treat either new or legacy verification flags as valid
     const emailVerified = Boolean(user.isEmailVerified) || Boolean(user.isVerified);
-    if (!emailVerified) return res.status(403).json({ message: 'Please verify your email before logging in' });
+    if (!emailVerified) {
+      console.log('[LOGIN] Email not verified');
+      return res.status(403).json({ message: 'Please verify your email before logging in' });
+    }
 
     // If user has no password (e.g., Google OAuth), guide to sign in with Google
     if (!user.password) {
+      console.log('[LOGIN] Google account, use Google login');
       return res.status(400).json({ message: 'This account was created with Google. Please log in using Sign in with Google.' });
     }
 
     // Check if password is correct
     const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(400).json({ message: 'Invalid credentials' });
+    if (!match) {
+      console.log('[LOGIN] Invalid credentials');
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
 
     // Always send 2FA code on login
     const twoFactorCode = crypto.randomInt(100000, 999999).toString();
@@ -226,8 +260,10 @@ router.post('/login', async (req, res) => {
     user.twoFactorCodeExpiration = Date.now() + 5 * 60 * 1000;
     await user.save();
     await send2FACode(user.email, twoFactorCode, 'Your MaggieGPT Login Code');
+    console.log('[LOGIN] 2FA code sent');
     return res.status(200).json({ message: '2FA code sent to your email', is2FA: true });
   } catch (err) {
+    console.error('[LOGIN] Error:', err.message);
     res.status(500).json({ message: 'Login failed', error: err.message });
   }
 });
