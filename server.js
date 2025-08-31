@@ -31,17 +31,10 @@ console.log('Configured BACKEND_URL:', BACKEND_URL);
 // ===================
 app.use(express.json());
 app.use(cors({
-  origin: [
-    FRONTEND_URL, 
-    'https://maggiegpt-frontend.vercel.app', 
-    'http://localhost:3000', 
-    'http://localhost:3001',
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:3001'
-  ],
+  origin: 'https://maggie-ai.netlify.app',
   credentials: true,
-  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization', 'X-Requested-With']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 app.use(helmet());
 
@@ -71,8 +64,9 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production', // Only true in production
+    httpOnly: true,
+    secure: true, // must be true for HTTPS
+    sameSite: 'None' // required for cross-site cookies with credentials
   }
 }));
 
